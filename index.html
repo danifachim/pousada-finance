@@ -1,0 +1,1209 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🏨 Pousada Finance</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Outfit', system-ui, sans-serif; background: #F8F6F2; color: #1A2928; }
+    #root { height: 100vh; display: flex; flex-direction: column; }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-thumb { background: #D0CAC0; border-radius: 99px; }
+    input[type=date]::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+    const { createClient } = window.supabase;
+
+    // ══════════════════════════════════════════════
+    // ⚙️  CONFIGURAÇÃO — altere apenas estas linhas
+    // ══════════════════════════════════════════════
+    const SUPA_URL = 'https://ongbydkoqntgfjfutlpb.supabase.co';
+    const SUPA_KEY = 'sb_publishable_0PoRZ1EMCh_oWZaYCgyUmQ_T2qpsjJN';
+    const db = createClient(SUPA_URL, SUPA_KEY);
+
+    // ══════════════════════════════════════════════
+    // TEMA
+    // ══════════════════════════════════════════════
+    const C = {
+      bg:'#F8F6F2', card:'#FFFFFF',
+      primary:'#1B7A6E', pLight:'#EAF5F3', pDark:'#0D5A50',
+      accent:'#BF8A2E', aLight:'#FBF3E3',
+      border:'#E8E4DC', text:'#1A2928', sub:'#7A8C8A',
+      red:'#D44040', rLight:'#FDEAEA',
+      green:'#2A8A52', gLight:'#E6F6ED',
+      orange:'#D97838', oLight:'#FEF0E4',
+    };
+    const F  = "'Outfit', system-ui, sans-serif";
+    const FD = "'Fraunces', Georgia, serif";
+
+    // ══════════════════════════════════════════════
+    // DADOS PADRÃO
+    // ══════════════════════════════════════════════
+    const CATS_DEFAULT = [
+      { id:'hosp', name:'Hospedagem (Diárias)',      type:'income',  color:'#1B7A6E', icon:'🛏️', kw:['diaria','diária','hospedagem','reserva','booking','airbnb','quarto'] },
+      { id:'cafe', name:'Café da Manhã',              type:'income',  color:'#BF8A2E', icon:'☕', kw:['cafe','café','breakfast','desjejum'] },
+      { id:'manu', name:'Manutenção',                 type:'expense', color:'#D97838', icon:'🔧', kw:['manutencao','manutenção','reparo','conserto','obra','pintura'] },
+      { id:'func', name:'Funcionários / Pró-labore',  type:'expense', color:'#8B4F9E', icon:'👥', kw:['salario','salário','funcionario','prolabore','folha'] },
+      { id:'util', name:'Utilidades',                 type:'expense', color:'#2E6DB0', icon:'💡', kw:['energia','luz','agua','água','internet','telefone','gas','gás','celesc','sabesp','copel','vivo','claro'] },
+      { id:'impo', name:'Impostos / Taxas',            type:'expense', color:'#C0392B', icon:'📋', kw:['imposto','taxa','tributo','das','irpf','inss','fgts','iss'] },
+      { id:'inc+', name:'Outras Entradas',             type:'income',  color:'#27AE60', icon:'💰', kw:[] },
+      { id:'exp+', name:'Outras Saídas',               type:'expense', color:'#95A5A6', icon:'💸', kw:[] },
+    ];
+    const ACCS_DEFAULT = [
+      { id:'a1', name:'Conta Principal (PJ)', bank:'', color:'#1B7A6E' },
+      { id:'a2', name:'Conta Pessoal',        bank:'', color:'#2E6DB0' },
+      { id:'a3', name:'Conta Auxiliar',       bank:'', color:'#8B4F9E' },
+    ];
+
+    // ══════════════════════════════════════════════
+    // UTILITÁRIOS
+    // ══════════════════════════════════════════════
+    const brl  = n => new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(n||0);
+    const uid  = () => Math.random().toString(36).slice(2,11);
+    const norm = s => (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+
+    function matchRule(desc, rules) {
+      const n = norm(desc);
+      for (const [kw,cat] of Object.entries(rules||{})) if (n.includes(kw)) return cat;
+      return null;
+    }
+    function matchCatKw(desc, cats) {
+      const n = norm(desc);
+      for (const cat of cats) for (const kw of (cat.kw||[])) if (n.includes(norm(kw))) return cat.id;
+      return null;
+    }
+
+    // ══════════════════════════════════════════════
+    // CAMADA DE BANCO DE DADOS (Supabase)
+    // ══════════════════════════════════════════════
+    const DB = {
+      async getTransactions() {
+        const { data, error } = await db.from('transactions').select('*').order('date',{ascending:false});
+        if (error) throw error;
+        return data || [];
+      },
+      async upsertTransaction(tx) {
+        const { error } = await db.from('transactions').upsert(tx,{onConflict:'id'});
+        if (error) throw error;
+      },
+      async upsertTransactions(txs) {
+        if (!txs.length) return;
+        const { error } = await db.from('transactions').upsert(txs,{onConflict:'id'});
+        if (error) throw error;
+      },
+      async deleteTransaction(id) {
+        const { error } = await db.from('transactions').delete().eq('id',id);
+        if (error) throw error;
+      },
+      async getCategories() {
+        const { data } = await db.from('categories').select('*').order('name');
+        return (data||[]).map(c => ({...c, kw: Array.isArray(c.kw)?c.kw:(c.kw||[])}));
+      },
+      async upsertCategory(cat) {
+        const { error } = await db.from('categories').upsert(cat,{onConflict:'id'});
+        if (error) throw error;
+      },
+      async deleteCategory(id) {
+        const { error } = await db.from('categories').delete().eq('id',id);
+        if (error) throw error;
+      },
+      async getAccounts() {
+        const { data } = await db.from('accounts').select('*').order('name');
+        return data || [];
+      },
+      async upsertAccount(acc) {
+        const { error } = await db.from('accounts').upsert(acc,{onConflict:'id'});
+        if (error) throw error;
+      },
+      async deleteAccount(id) {
+        const { error } = await db.from('accounts').delete().eq('id',id);
+        if (error) throw error;
+      },
+      async getRules() {
+        const { data } = await db.from('rules').select('*');
+        const r = {};
+        (data||[]).forEach(x => r[x.keyword]=x.category_id);
+        return r;
+      },
+      async upsertRules(obj) {
+        const rows = Object.entries(obj).map(([keyword,category_id])=>({keyword,category_id}));
+        if (!rows.length) return;
+        await db.from('rules').upsert(rows,{onConflict:'keyword'});
+      },
+      async getSetting(key) {
+        const { data } = await db.from('app_settings').select('value').eq('key',key).maybeSingle();
+        return data?.value || null;
+      },
+      async setSetting(key, value) {
+        await db.from('app_settings').upsert({key,value},{onConflict:'key'});
+      },
+      async initDefaults() {
+        const cats = await this.getCategories();
+        if (cats.length===0) for (const c of CATS_DEFAULT) await this.upsertCategory(c);
+        const accs = await this.getAccounts();
+        if (accs.length===0) for (const a of ACCS_DEFAULT) await this.upsertAccount(a);
+      },
+    };
+
+    // ══════════════════════════════════════════════
+    // PARSERS
+    // ══════════════════════════════════════════════
+    function parseOFX(text) {
+      const txs = [];
+      const blocks = text.match(/<STMTTRN[\s\S]*?<\/STMTTRN>/gi)||[];
+      for (const b of blocks) {
+        const g = t => { const m=b.match(new RegExp(`<${t}>([^\r\n<]+)`,'i')); return m?m[1].trim():''; };
+        const ds = g('DTPOSTED')||g('DTUSER');
+        const date = ds.length>=8?`${ds.slice(0,4)}-${ds.slice(4,6)}-${ds.slice(6,8)}`:new Date().toISOString().slice(0,10);
+        const amt = parseFloat(g('TRNAMT')||'0');
+        const desc = g('MEMO')||g('NAME')||'';
+        if (desc&&Math.abs(amt)>0) txs.push({id:uid(),date,description:desc,amount:Math.abs(amt),type:amt>=0?'income':'expense',category:null,account:'a1',source:'ofx'});
+      }
+      return txs;
+    }
+
+    function parseExcel(file) {
+      return new Promise((res,rej) => {
+        const reader = new FileReader();
+        reader.onload = e => {
+          try {
+            const wb = XLSX.read(e.target.result,{type:'binary'});
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+            const txs = [];
+            if (!rows.length) return res(txs);
+            const hdr = rows[0].map(h=>norm(String(h||'')));
+            let di=-1,xi=-1,ai=-1,dbi=-1,cri=-1;
+            hdr.forEach((h,i)=>{
+              if((h.includes('data')||h.includes('date'))&&di<0) di=i;
+              if((h.includes('descri')||h.includes('historico')||h.includes('lancamento')||h.includes('memo'))&&xi<0) xi=i;
+              if((h.includes('valor')||h.includes('amount'))&&!h.includes('deb')&&!h.includes('cred')&&ai<0) ai=i;
+              if((h.includes('debito')||h.includes('saida'))&&dbi<0) dbi=i;
+              if((h.includes('credito')||h.includes('entrada'))&&cri<0) cri=i;
+            });
+            if(di<0)di=0; if(xi<0)xi=1;
+            for(let i=1;i<rows.length;i++){
+              const row=rows[i];
+              if(!row||row.every(c=>c===''||c==null)) continue;
+              let date=new Date().toISOString().slice(0,10),desc='',amount=0,type='expense';
+              const dv=row[di];
+              if(typeof dv==='number'){const d=new Date((dv-25569)*86400*1000);date=d.toISOString().slice(0,10);}
+              else{const s=String(dv||'');if(s.match(/\d{2}\/\d{2}\/\d{4}/)){const[d2,m2,y2]=s.split('/');date=`${y2}-${m2.padStart(2,'0')}-${d2.padStart(2,'0')}`;}else if(s.match(/\d{4}-\d{2}-\d{2}/))date=s.slice(0,10);}
+              desc=String(row[xi]||'').trim();
+              if(ai>=0){const v=parseFloat(String(row[ai]||'0').replace(/\./g,'').replace(',','.'));amount=Math.abs(v);type=v>=0?'income':'expense';}
+              else if(dbi>=0||cri>=0){const d2=parseFloat(String(row[dbi>=0?dbi:0]||'0').replace(/\./g,'').replace(',','.'))||0;const cr=parseFloat(String(row[cri>=0?cri:0]||'0').replace(/\./g,'').replace(',','.'))||0;if(cr>0){amount=cr;type='income';}else{amount=d2;type='expense';}}
+              if(desc&&amount>0) txs.push({id:uid(),date,description:desc,amount,type,category:null,account:'a1',source:'xlsx'});
+            }
+            res(txs);
+          }catch(e){rej(e);}
+        };
+        reader.onerror=rej;
+        reader.readAsBinaryString(file);
+      });
+    }
+
+    // ══════════════════════════════════════════════
+    // IA (requer chave Anthropic nas Configurações)
+    // ══════════════════════════════════════════════
+    async function categorizeWithAI(transactions, categories, apiKey) {
+      if (!transactions.length||!apiKey) return [];
+      const catList = categories.map(c=>`${c.id}: ${c.name} (${c.type==='income'?'entrada':'saída'})`).join('\n');
+      const BATCH = 30;
+      const results = [];
+      for (let i=0; i<transactions.length; i+=BATCH) {
+        const batch = transactions.slice(i, i+BATCH);
+        const clean = s => s.replace(/["\\\n\r\t]/g,' ').replace(/\s+/g,' ').trim();
+        const txList = batch.map(t=>`${t.id}|${clean(t.description)}|${brl(t.amount)}|${t.type==='income'?'ENTRADA':'SAÍDA'}`).join('\n');
+        try {
+          const resp = await fetch('https://pousada-proxy.negociosdepraia-a02.workers.dev/',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+              apiKey,
+              model:'claude-sonnet-4-20250514', max_tokens:4096,
+              system:'Categorize transações de pousada. Retorne apenas JSON válido, sem markdown.',
+              messages:[{role:'user',content:`Categorias:\n${catList}\n\nTransações (ID|Desc|Valor|Tipo):\n${txList}\n\nRetorne APENAS JSON: [{"id":"tx_id","categoryId":"cat_id","confidence":0.9}]`}]
+            })
+          });
+          const data = await resp.json();
+          const raw=(data.content?.[0]?.text||'[]').replace(/```[a-z]*/g,'').replace(/```/g,'').trim();
+          // Extrai apenas o array JSON mesmo se vier texto extra
+          const match = raw.match(/\[[\s\S]*\]/);
+          if (match) {
+            try { results.push(...JSON.parse(match[0])); } catch(je){ console.error('JSON parse erro:', je); }
+          }
+        }catch(e){console.error('AI error lote '+(i/BATCH+1)+':',e);}
+      }
+      return results;
+    }
+
+    // ══════════════════════════════════════════════
+    // GRÁFICOS SVG CUSTOMIZADOS
+    // ══════════════════════════════════════════════
+    function BarGroupChart({data}) {
+      if (!data||!data.length) return null;
+      const W=520, H=160, padL=8, padR=8, padT=10;
+      const maxV = Math.max(...data.flatMap(d=>[d.Entradas||0,d.Saídas||0]),100);
+      const gW = (W-padL-padR)/data.length;
+      const bw = Math.min(14, gW*0.3);
+
+      return (
+        <svg viewBox={`0 0 ${W} ${H+44}`} style={{width:'100%',overflow:'visible'}}>
+          {[0,0.5,1].map(v=>(
+            <line key={v} x1={padL} y1={padT+(1-v)*(H-padT)} x2={W-padR} y2={padT+(1-v)*(H-padT)}
+              stroke={C.border} strokeWidth={1} strokeDasharray={v===0?'':'3,3'}/>
+          ))}
+          {data.map((d,i)=>{
+            const cx = padL + (i+0.5)*gW;
+            const h1 = Math.max(2,(d.Entradas/maxV)*(H-padT));
+            const h2 = Math.max(2,(d.Saídas/maxV)*(H-padT));
+            return (
+              <g key={i}>
+                <rect x={cx-bw-2} y={H-h1} width={bw} height={h1} fill={C.green} rx={3}/>
+                <rect x={cx+2}    y={H-h2} width={bw} height={h2} fill={C.red}   rx={3}/>
+                <text x={cx} y={H+14} textAnchor="middle" fontSize={10} fill={C.sub}>{d.name}</text>
+              </g>
+            );
+          })}
+          <line x1={padL} y1={H} x2={W-padR} y2={H} stroke={C.border}/>
+          <rect x={padL} y={H+24} width={10} height={8} fill={C.green} rx={2}/>
+          <text x={padL+13} y={H+32} fontSize={10} fill={C.sub}>Entradas</text>
+          <rect x={padL+70} y={H+24} width={10} height={8} fill={C.red} rx={2}/>
+          <text x={padL+83} y={H+32} fontSize={10} fill={C.sub}>Saídas</text>
+        </svg>
+      );
+    }
+
+    function DonutChart({data, size=160}) {
+      const total = data.reduce((s,d)=>s+d.value,0);
+      if (!total) return <div style={{height:size,display:'flex',alignItems:'center',justifyContent:'center',color:C.sub,fontSize:13}}>Sem dados</div>;
+      const r=size/2-6, ri=r*0.52, cx=size/2, cy=size/2;
+      let ang = -Math.PI/2;
+      const paths = data.map(d=>{
+        const sw=(d.value/total)*Math.PI*2;
+        const ea=ang+sw;
+        const p=`M ${cx+r*Math.cos(ang)} ${cy+r*Math.sin(ang)} A ${r} ${r} 0 ${sw>Math.PI?1:0} 1 ${cx+r*Math.cos(ea)} ${cy+r*Math.sin(ea)} L ${cx+ri*Math.cos(ea)} ${cy+ri*Math.sin(ea)} A ${ri} ${ri} 0 ${sw>Math.PI?1:0} 0 ${cx+ri*Math.cos(ang)} ${cy+ri*Math.sin(ang)} Z`;
+        ang=ea;
+        return {p, color:d.color};
+      });
+      return (
+        <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
+          {paths.map((x,i)=><path key={i} d={x.p} fill={x.color}/>)}
+        </svg>
+      );
+    }
+
+    function HBarList({data}) {
+      const max = Math.max(...data.map(d=>d.value),1);
+      return (
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          {data.map((d,i)=>(
+            <div key={i} style={{display:'flex',alignItems:'center',gap:10}}>
+              <span style={{fontSize:13,minWidth:130,textAlign:'right',color:C.sub,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.icon} {d.name}</span>
+              <div style={{flex:1,height:10,background:C.border,borderRadius:99,overflow:'hidden'}}>
+                <div style={{width:`${(d.value/max)*100}%`,height:'100%',background:d.color,borderRadius:99,transition:'width 0.3s'}}/>
+              </div>
+              <span style={{fontSize:12,color:C.text,fontWeight:600,minWidth:90,textAlign:'right'}}>{brl(d.value)}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // ══════════════════════════════════════════════
+    // UI PRIMITIVOS
+    // ══════════════════════════════════════════════
+    function Card({children, style, onClick}) {
+      return <div onClick={onClick} style={{background:C.card,borderRadius:12,border:`1px solid ${C.border}`,padding:20,boxShadow:'0 1px 6px rgba(0,0,0,0.04)',...style}}>{children}</div>;
+    }
+
+    function Btn({children, onClick, variant, size, disabled, style}) {
+      variant = variant||'primary'; size = size||'md';
+      const sz={sm:{padding:'6px 12px',fontSize:12},md:{padding:'9px 18px',fontSize:13},lg:{padding:'12px 28px',fontSize:15}};
+      const vr={primary:{background:C.primary,color:'#fff',border:'none'},secondary:{background:C.pLight,color:C.primary,border:'none'},ghost:{background:'transparent',color:C.text,border:`1px solid ${C.border}`},danger:{background:C.rLight,color:C.red,border:'none'},accent:{background:C.accent,color:'#fff',border:'none'}};
+      return <button disabled={disabled} onClick={onClick} style={{...sz[size],...vr[variant],borderRadius:8,cursor:disabled?'not-allowed':'pointer',fontFamily:F,fontWeight:600,display:'inline-flex',alignItems:'center',gap:6,opacity:disabled?0.5:1,whiteSpace:'nowrap',...style}}>{children}</button>;
+    }
+
+    function Inp({value,onChange,placeholder,type,style,onKeyDown}) {
+      return <input type={type||'text'} value={value} onChange={onChange} placeholder={placeholder} onKeyDown={onKeyDown} style={{padding:'9px 12px',border:`1.5px solid ${C.border}`,borderRadius:8,fontSize:13,fontFamily:F,outline:'none',background:C.card,width:'100%',boxSizing:'border-box',color:C.text,...style}}/>;
+    }
+
+    function Sel({value,onChange,children,style}) {
+      return <select value={value} onChange={onChange} style={{padding:'9px 12px',border:`1.5px solid ${C.border}`,borderRadius:8,fontSize:13,fontFamily:F,outline:'none',background:C.card,color:C.text,width:'100%',...style}}>{children}</select>;
+    }
+
+    function Badge({color,children}) {
+      return <span style={{background:color+'22',color,padding:'3px 9px',borderRadius:99,fontSize:11,fontWeight:600,whiteSpace:'nowrap'}}>{children}</span>;
+    }
+
+    function PageHeader({title,sub,actions}) {
+      return (
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:24}}>
+          <div>
+            <h1 style={{fontFamily:FD,fontSize:24,fontWeight:600,color:C.text,margin:0}}>{title}</h1>
+            {sub&&<p style={{color:C.sub,fontSize:13,marginTop:4}}>{sub}</p>}
+          </div>
+          {actions&&<div style={{display:'flex',gap:10,flexWrap:'wrap'}}>{actions}</div>}
+        </div>
+      );
+    }
+
+    const lbl = {display:'block',fontSize:11,fontWeight:700,color:C.sub,marginBottom:5,textTransform:'uppercase',letterSpacing:'0.05em'};
+
+    // ══════════════════════════════════════════════
+    // LOGIN
+    // ══════════════════════════════════════════════
+    function LoginPage({onLogin}) {
+      const [pw,setPw]=useState('');
+      const [err,setErr]=useState('');
+      const [loading,setLoading]=useState(false);
+
+      async function handle() {
+        if(!pw) return;
+        setLoading(true); setErr('');
+        try {
+          const saved = await DB.getSetting('password')||'pousada123';
+          if(pw===saved) onLogin();
+          else {setErr('Senha incorreta'); setLoading(false);}
+        }catch(e){setErr('Erro de conexão. Verifique o Supabase.'); setLoading(false);}
+      }
+
+      return (
+        <div style={{minHeight:'100vh',background:`linear-gradient(150deg,${C.pLight} 0%,${C.bg} 60%)`,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:F}}>
+          <Card style={{width:380,padding:44}}>
+            <div style={{textAlign:'center',marginBottom:32}}>
+              <div style={{fontSize:52,marginBottom:10}}>🏨</div>
+              <h1 style={{fontFamily:FD,fontSize:28,fontWeight:600,color:C.text,margin:0}}>Pousada Finance</h1>
+              <p style={{color:C.sub,marginTop:6,fontSize:13}}>Controle financeiro inteligente</p>
+            </div>
+            <label style={lbl}>Senha de Acesso</label>
+            <Inp value={pw} onChange={e=>setPw(e.target.value)} type="password" placeholder="Digite sua senha"
+              onKeyDown={e=>e.key==='Enter'&&handle()} style={{marginBottom:14}}/>
+            {err&&<p style={{color:C.red,fontSize:12,marginBottom:10}}>{err}</p>}
+            <Btn onClick={handle} size="lg" disabled={loading} style={{width:'100%',justifyContent:'center'}}>
+              {loading?'Verificando...':'Entrar →'}
+            </Btn>
+            <p style={{textAlign:'center',fontSize:11,color:C.sub,marginTop:14}}>Senha padrão: <strong>pousada123</strong></p>
+          </Card>
+        </div>
+      );
+    }
+
+    // ══════════════════════════════════════════════
+    // DASHBOARD
+    // ══════════════════════════════════════════════
+    function DashboardPage({transactions, categories, accounts}) {
+      const now = new Date();
+      const thisM = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+      const mTxs = transactions.filter(t=>t.date?.startsWith(thisM));
+      const totalIn  = mTxs.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+      const totalOut = mTxs.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+      const allIn    = transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+      const allOut   = transactions.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+
+      const areaData = [];
+      for(let m=5;m>=0;m--){
+        const d=new Date(now.getFullYear(),now.getMonth()-m,1);
+        const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        const txs=transactions.filter(t=>t.date?.startsWith(k));
+        areaData.push({
+          name: d.toLocaleDateString('pt-BR',{month:'short'}).replace('.',''),
+          Entradas: +txs.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0).toFixed(2),
+          'Saídas': +txs.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0).toFixed(2),
+        });
+      }
+
+      const pieData = categories.map(cat=>({...cat, value:mTxs.filter(t=>t.category===cat.id).reduce((s,t)=>s+t.amount,0)})).filter(d=>d.value>0);
+      const recent  = [...transactions].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,6);
+      const sumCards= [
+        {l:'Entradas (mês)',   v:brl(totalIn),        c:C.green, bg:C.gLight, ic:'↑'},
+        {l:'Saídas (mês)',     v:brl(totalOut),       c:C.red,   bg:C.rLight, ic:'↓'},
+        {l:'Resultado (mês)',  v:brl(totalIn-totalOut), c:(totalIn-totalOut)>=0?C.green:C.red, bg:(totalIn-totalOut)>=0?C.gLight:C.rLight, ic:'≈'},
+        {l:'Saldo Acumulado',  v:brl(allIn-allOut),   c:C.primary, bg:C.pLight, ic:'◎'},
+      ];
+
+      return (
+        <div style={{padding:28,fontFamily:F}}>
+          <PageHeader title="Dashboard" sub={now.toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}/>
+
+          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:14,marginBottom:20}}>
+            {sumCards.map((s,i)=>(
+              <Card key={i} style={{padding:18}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+                  <div>
+                    <p style={{fontSize:11,fontWeight:700,color:C.sub,textTransform:'uppercase',letterSpacing:'0.06em',margin:0}}>{s.l}</p>
+                    <p style={{fontSize:20,fontWeight:700,color:s.c,margin:'8px 0 0',fontFamily:FD}}>{s.v}</p>
+                  </div>
+                  <span style={{fontSize:18,background:s.bg,padding:'7px 9px',borderRadius:8,color:s.c}}>{s.ic}</span>
+                </div>
+              </Card>
+            ))}
+          </div>
+
+          <div style={{display:'grid',gridTemplateColumns:'1.7fr 1fr',gap:14,marginBottom:14}}>
+            <Card>
+              <h3 style={{margin:'0 0 16px',fontSize:13,fontWeight:700,color:C.text}}>Evolução — últimos 6 meses</h3>
+              <BarGroupChart data={areaData}/>
+            </Card>
+            <Card>
+              <h3 style={{margin:'0 0 16px',fontSize:13,fontWeight:700,color:C.text}}>Por categoria (mês)</h3>
+              <div style={{display:'flex',justifyContent:'center',marginBottom:12}}>
+                <DonutChart data={pieData} size={160}/>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                {pieData.slice(0,5).map(d=>(
+                  <div key={d.id} style={{display:'flex',alignItems:'center',gap:6}}>
+                    <div style={{width:8,height:8,borderRadius:99,background:d.color,flexShrink:0}}/>
+                    <span style={{fontSize:11,color:C.sub,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.icon} {d.name}</span>
+                    <span style={{fontSize:11,fontWeight:600,color:C.text}}>{brl(d.value)}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+
+          <Card style={{padding:0,overflow:'hidden'}}>
+            <div style={{padding:'14px 20px',borderBottom:`1px solid ${C.border}`}}>
+              <h3 style={{margin:0,fontSize:13,fontWeight:700,color:C.text}}>Transações Recentes</h3>
+            </div>
+            {recent.length===0
+              ? <p style={{textAlign:'center',padding:'32px',color:C.sub,fontSize:13}}>Nenhuma transação ainda. Importe um extrato para começar!</p>
+              : <table style={{width:'100%',borderCollapse:'collapse'}}>
+                  <thead><tr style={{background:C.bg}}>
+                    {['Data','Descrição','Categoria','Conta','Valor'].map(h=>(
+                      <th key={h} style={{textAlign:'left',padding:'10px 16px',fontSize:11,fontWeight:700,color:C.sub,textTransform:'uppercase',letterSpacing:'0.05em',borderBottom:`1px solid ${C.border}`}}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>{recent.map(t=>{
+                    const cat=categories.find(c=>c.id===t.category);
+                    const acc=accounts.find(a=>a.id===t.account);
+                    return <tr key={t.id} style={{borderBottom:`1px solid ${C.border}`}}>
+                      <td style={{padding:'11px 16px',fontSize:12,color:C.sub,whiteSpace:'nowrap'}}>{new Date(t.date+'T12:00:00').toLocaleDateString('pt-BR')}</td>
+                      <td style={{padding:'11px 16px',fontSize:13,color:C.text,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description}</td>
+                      <td style={{padding:'11px 16px'}}>{cat?<Badge color={cat.color}>{cat.icon} {cat.name}</Badge>:<span style={{color:C.sub,fontSize:11}}>—</span>}</td>
+                      <td style={{padding:'11px 16px',fontSize:11,color:acc?.color||C.sub,fontWeight:600}}>{acc?.name||'—'}</td>
+                      <td style={{padding:'11px 16px',fontSize:13,fontWeight:700,color:t.type==='income'?C.green:C.red,textAlign:'right',whiteSpace:'nowrap'}}>{t.type==='income'?'+':'-'}{brl(t.amount)}</td>
+                    </tr>;
+                  })}</tbody>
+                </table>
+            }
+          </Card>
+        </div>
+      );
+    }
+
+    // ══════════════════════════════════════════════
+    // TRANSAÇÕES
+    // ══════════════════════════════════════════════
+    function TransactionsPage({transactions, setTransactions, categories, accounts}) {
+      const [filter,setFilter]=useState({type:'',category:'',account:'',search:'',month:''});
+      const [showForm,setShowForm]=useState(false);
+      const [editTx,setEditTx]=useState(null);
+      const [form,setForm]=useState({date:'',description:'',amount:'',type:'expense',category:'',account:'a1'});
+      const [saving,setSaving]=useState(false);
+
+      const filtered = transactions.filter(t=>{
+        if(filter.type&&t.type!==filter.type) return false;
+        if(filter.category&&t.category!==filter.category) return false;
+        if(filter.account&&t.account!==filter.account) return false;
+        if(filter.month&&!t.date?.startsWith(filter.month)) return false;
+        if(filter.search&&!norm(t.description).includes(norm(filter.search))) return false;
+        return true;
+      }).sort((a,b)=>new Date(b.date)-new Date(a.date));
+
+      const sumIn  = filtered.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+      const sumOut = filtered.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+
+      function openAdd() {
+        setForm({date:new Date().toISOString().slice(0,10),description:'',amount:'',type:'expense',category:'',account:'a1'});
+        setEditTx(null); setShowForm(true);
+      }
+      function openEdit(tx) {
+        setForm({date:tx.date,description:tx.description,amount:String(tx.amount),type:tx.type,category:tx.category||'',account:tx.account||'a1'});
+        setEditTx(tx); setShowForm(true);
+      }
+      async function save() {
+        if(!form.description||!form.amount||!form.date) return;
+        setSaving(true);
+        const tx={...form,amount:parseFloat(form.amount),id:editTx?.id||uid(),source:editTx?.source||'manual'};
+        await DB.upsertTransaction(tx);
+        setTransactions(editTx ? transactions.map(t=>t.id===editTx.id?tx:t) : [tx,...transactions]);
+        setSaving(false); setShowForm(false);
+      }
+      async function del(id) {
+        if(!confirm('Excluir esta transação?')) return;
+        await DB.deleteTransaction(id);
+        setTransactions(transactions.filter(t=>t.id!==id));
+      }
+      function exportXlsx() {
+        const rows=filtered.map(t=>({Data:t.date,Descrição:t.description,Tipo:t.type==='income'?'Entrada':'Saída',Categoria:categories.find(c=>c.id===t.category)?.name||'',Conta:accounts.find(a=>a.id===t.account)?.name||'',Valor:t.amount}));
+        const wb=XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),'Transações');
+        XLSX.writeFile(wb,`transacoes_${new Date().toISOString().slice(0,10)}.xlsx`);
+      }
+
+      return (
+        <div style={{padding:28,fontFamily:F}}>
+          <PageHeader title="Transações" sub={`${filtered.length} registros`}
+            actions={[<Btn key="e" variant="ghost" onClick={exportXlsx}>⬇ Excel</Btn>,<Btn key="a" onClick={openAdd}>+ Adicionar</Btn>]}/>
+
+          <Card style={{padding:14,marginBottom:16}}>
+            <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr 1fr',gap:10,marginBottom:12}}>
+              <Inp value={filter.search} onChange={e=>setFilter(p=>({...p,search:e.target.value}))} placeholder="🔍 Buscar descrição..."/>
+              <input type="month" value={filter.month} onChange={e=>setFilter(p=>({...p,month:e.target.value}))}
+                style={{padding:'9px 10px',border:`1.5px solid ${C.border}`,borderRadius:8,fontSize:13,fontFamily:F,outline:'none',color:C.text}}/>
+              <Sel value={filter.type} onChange={e=>setFilter(p=>({...p,type:e.target.value}))}>
+                <option value="">Todos os tipos</option><option value="income">Entradas</option><option value="expense">Saídas</option>
+              </Sel>
+              <Sel value={filter.category} onChange={e=>setFilter(p=>({...p,category:e.target.value}))}>
+                <option value="">Todas categorias</option>
+                {categories.map(c=><option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+              </Sel>
+              <Sel value={filter.account} onChange={e=>setFilter(p=>({...p,account:e.target.value}))}>
+                <option value="">Todas as contas</option>
+                {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+              </Sel>
+            </div>
+            <div style={{display:'flex',gap:20,paddingTop:10,borderTop:`1px solid ${C.border}`}}>
+              <span style={{fontSize:12,color:C.sub}}>Entradas: <strong style={{color:C.green}}>{brl(sumIn)}</strong></span>
+              <span style={{fontSize:12,color:C.sub}}>Saídas: <strong style={{color:C.red}}>{brl(sumOut)}</strong></span>
+              <span style={{fontSize:12,color:C.sub}}>Resultado: <strong style={{color:(sumIn-sumOut)>=0?C.green:C.red}}>{brl(sumIn-sumOut)}</strong></span>
+            </div>
+          </Card>
+
+          <Card style={{padding:0,overflow:'hidden'}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead><tr style={{background:C.bg}}>
+                {['Data','Descrição','Categoria','Conta','Valor',''].map(h=>(
+                  <th key={h} style={{textAlign:'left',padding:'11px 16px',fontSize:11,fontWeight:700,color:C.sub,textTransform:'uppercase',letterSpacing:'0.05em',borderBottom:`1px solid ${C.border}`}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {filtered.length===0
+                  ? <tr><td colSpan={6} style={{padding:'40px',textAlign:'center',color:C.sub,fontSize:13}}>Nenhuma transação encontrada</td></tr>
+                  : filtered.map(t=>{
+                    const cat=categories.find(c=>c.id===t.category);
+                    const acc=accounts.find(a=>a.id===t.account);
+                    return <tr key={t.id} style={{borderBottom:`1px solid ${C.border}`}}>
+                      <td style={{padding:'11px 16px',fontSize:12,color:C.sub,whiteSpace:'nowrap'}}>{new Date(t.date+'T12:00:00').toLocaleDateString('pt-BR')}</td>
+                      <td style={{padding:'11px 16px',fontSize:13,color:C.text,maxWidth:240,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description}</td>
+                      <td style={{padding:'11px 16px'}}>{cat?<Badge color={cat.color}>{cat.icon} {cat.name}</Badge>:<span style={{color:C.sub,fontSize:11,fontStyle:'italic'}}>Sem categoria</span>}</td>
+                      <td style={{padding:'11px 16px',fontSize:11,color:acc?.color||C.sub,fontWeight:600}}>{acc?.name||'—'}</td>
+                      <td style={{padding:'11px 16px',fontSize:13,fontWeight:700,color:t.type==='income'?C.green:C.red,textAlign:'right',whiteSpace:'nowrap'}}>{t.type==='income'?'+':'-'}{brl(t.amount)}</td>
+                      <td style={{padding:'11px 16px',textAlign:'right',whiteSpace:'nowrap'}}>
+                        <span onClick={()=>openEdit(t)} style={{cursor:'pointer',marginRight:8,opacity:0.5}}>✏️</span>
+                        <span onClick={()=>del(t.id)} style={{cursor:'pointer',opacity:0.5}}>🗑️</span>
+                      </td>
+                    </tr>;
+                  })
+                }
+              </tbody>
+            </table>
+          </Card>
+
+          {showForm&&(
+            <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.35)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}} onClick={e=>e.target===e.currentTarget&&setShowForm(false)}>
+              <Card style={{width:460,padding:32}}>
+                <h2 style={{fontFamily:FD,fontSize:20,fontWeight:600,color:C.text,margin:'0 0 22px'}}>{editTx?'Editar':'Nova'} Transação</h2>
+                <div style={{display:'grid',gap:14}}>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                    <div><label style={lbl}>Data</label><Inp type="date" value={form.date} onChange={e=>setForm(p=>({...p,date:e.target.value}))}/></div>
+                    <div><label style={lbl}>Tipo</label>
+                      <Sel value={form.type} onChange={e=>setForm(p=>({...p,type:e.target.value,category:''}))}>
+                        <option value="income">↑ Entrada</option><option value="expense">↓ Saída</option>
+                      </Sel>
+                    </div>
+                  </div>
+                  <div><label style={lbl}>Descrição</label><Inp value={form.description} onChange={e=>setForm(p=>({...p,description:e.target.value}))} placeholder="Ex: Diária quarto 01"/></div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                    <div><label style={lbl}>Valor (R$)</label><Inp type="number" value={form.amount} onChange={e=>setForm(p=>({...p,amount:e.target.value}))} placeholder="0.00"/></div>
+                    <div><label style={lbl}>Conta</label><Sel value={form.account} onChange={e=>setForm(p=>({...p,account:e.target.value}))}>{accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</Sel></div>
+                  </div>
+                  <div><label style={lbl}>Categoria</label>
+                    <Sel value={form.category} onChange={e=>setForm(p=>({...p,category:e.target.value}))}>
+                      <option value="">Selecionar categoria...</option>
+                      {categories.filter(c=>c.type===form.type).map(c=><option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+                    </Sel>
+                  </div>
+                </div>
+                <div style={{display:'flex',gap:10,justifyContent:'flex-end',marginTop:22}}>
+                  <Btn variant="ghost" onClick={()=>setShowForm(false)}>Cancelar</Btn>
+                  <Btn onClick={save} disabled={saving}>{saving?'Salvando...':'Salvar'}</Btn>
+                </div>
+              </Card>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ══════════════════════════════════════════════
+    // IMPORTAR EXTRATO
+    // ══════════════════════════════════════════════
+    function ImportPage({transactions, setTransactions, categories, accounts, rules, setRules, anthropicKey}) {
+      const [step,setStep]=useState(0);
+      const [parsed,setParsed]=useState([]);
+      const [reviewed,setReviewed]=useState([]);
+      const [aiLoading,setAiLoading]=useState(false);
+      const [selAcc,setSelAcc]=useState('a1');
+      const [error,setError]=useState('');
+      const [drag,setDrag]=useState(false);
+      const [saving,setSaving]=useState(false);
+      const fileRef=useRef();
+
+      async function handleFile(file) {
+        setError('');
+        try {
+          let txs=[];
+          const n=file.name.toLowerCase();
+          if(n.endsWith('.ofx')||n.endsWith('.qfx')) txs=parseOFX(await file.text());
+          else if(n.endsWith('.xlsx')||n.endsWith('.xls')||n.endsWith('.csv')) txs=await parseExcel(file);
+          else{setError('Formato não suportado. Use .ofx, .xlsx, .xls ou .csv');return;}
+          if(!txs.length){setError('Nenhuma transação encontrada.');return;}
+          const existing=new Set(transactions.map(t=>norm(t.description)+t.amount+t.date));
+          const nodup=txs.filter(t=>!existing.has(norm(t.description)+t.amount+t.date));
+          setParsed(nodup.map(t=>({...t,account:selAcc})));
+          setStep(1);
+        }catch(e){setError('Erro ao processar: '+e.message);}
+      }
+
+      async function doCategorize() {
+        setAiLoading(true);
+        const withRules=parsed.map(t=>{
+          const fr=matchRule(t.description,rules);
+          const fk=matchCatKw(t.description,categories);
+          return {...t,category:fr||fk||null,confidence:fr||fk?1:0,src:fr?'rule':fk?'kw':null};
+        });
+        const needsAI=withRules.filter(t=>!t.category);
+        let aiRes=[];
+        if(needsAI.length&&anthropicKey) aiRes=await categorizeWithAI(needsAI,categories,anthropicKey);
+        const final=withRules.map(t=>{
+          if(t.category) return t;
+          const ai=aiRes.find(r=>r.id===t.id);
+          return {...t,category:ai?.categoryId||null,confidence:ai?.confidence||0,src:'ai'};
+        });
+        setReviewed(final); setAiLoading(false); setStep(2);
+      }
+
+      async function confirmImport() {
+        setSaving(true);
+        const newRules={...rules};
+        for(const t of reviewed.filter(t=>t.category)){
+          const kws=norm(t.description).split(' ').filter(w=>w.length>3).slice(0,3).join(' ');
+          if(kws.length>3) newRules[kws]=t.category;
+        }
+        await DB.upsertRules(newRules);
+        setRules(newRules);
+        await DB.upsertTransactions(reviewed);
+        setTransactions([...transactions,...reviewed.filter(r=>!transactions.find(t=>t.id===r.id))]);
+        setSaving(false); setStep(3);
+      }
+
+      if(step===3) return (
+        <div style={{padding:28,fontFamily:F,display:'flex',alignItems:'center',justifyContent:'center',minHeight:'70vh'}}>
+          <Card style={{textAlign:'center',padding:52,maxWidth:420}}>
+            <div style={{fontSize:52,marginBottom:16}}>✅</div>
+            <h2 style={{fontFamily:FD,color:C.text,margin:'0 0 8px'}}>Importação Concluída!</h2>
+            <p style={{color:C.sub,fontSize:13}}><strong style={{color:C.primary}}>{reviewed.length}</strong> transações importadas com sucesso.</p>
+            <Btn onClick={()=>{setParsed([]);setReviewed([]);setStep(0);}} style={{marginTop:20}}>⬅ Importar outro extrato</Btn>
+          </Card>
+        </div>
+      );
+
+      return (
+        <div style={{padding:28,fontFamily:F}}>
+          <PageHeader title="Importar Extrato" sub="Envie seu extrato para categorização automática"/>
+
+          <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:28}}>
+            {['Upload','Pré-visualização','Revisão IA'].map((s,i)=>(
+              <div key={i} style={{display:'flex',alignItems:'center',gap:6}}>
+                <div style={{width:26,height:26,borderRadius:99,background:step>i?C.green:step===i?C.primary:C.border,color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,flexShrink:0}}>
+                  {step>i?'✓':i+1}
+                </div>
+                <span style={{fontSize:13,fontWeight:step===i?700:400,color:step===i?C.primary:C.sub}}>{s}</span>
+                {i<2&&<span style={{color:C.border,margin:'0 2px'}}>→</span>}
+              </div>
+            ))}
+          </div>
+
+          {step===0&&(
+            <div style={{maxWidth:540}}>
+              <Card style={{marginBottom:14}}>
+                <label style={lbl}>Conta de Destino</label>
+                <Sel value={selAcc} onChange={e=>setSelAcc(e.target.value)}>
+                  {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+                </Sel>
+              </Card>
+              <div style={{border:`2px dashed ${drag?C.primary:C.border}`,borderRadius:12,background:drag?C.pLight:C.card,cursor:'pointer',textAlign:'center',padding:52,transition:'all 0.2s'}}
+                onClick={()=>fileRef.current?.click()}
+                onDragOver={e=>{e.preventDefault();setDrag(true);}}
+                onDragLeave={()=>setDrag(false)}
+                onDrop={e=>{e.preventDefault();setDrag(false);e.dataTransfer.files[0]&&handleFile(e.dataTransfer.files[0]);}}>
+                <div style={{fontSize:44,marginBottom:12}}>📤</div>
+                <p style={{fontWeight:700,color:C.text,margin:0,fontSize:15}}>Arraste o arquivo aqui ou clique</p>
+                <p style={{color:C.sub,fontSize:12,marginTop:8}}>Formatos: .ofx · .qfx · .xlsx · .xls · .csv</p>
+              </div>
+              <input ref={fileRef} type="file" accept=".ofx,.qfx,.xlsx,.xls,.csv" style={{display:'none'}} onChange={e=>e.target.files[0]&&handleFile(e.target.files[0])}/>
+              {error&&<p style={{color:C.red,marginTop:12,fontSize:13}}>⚠️ {error}</p>}
+              {!anthropicKey&&<p style={{color:C.orange,marginTop:10,fontSize:12}}>💡 Configure a chave Anthropic nas Configurações para ativar a categorização por IA.</p>}
+            </div>
+          )}
+
+          {step===1&&(
+            <div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+                <p style={{margin:0,fontWeight:700,color:C.text}}>{parsed.length} transações encontradas</p>
+                <div style={{display:'flex',gap:10}}>
+                  <Btn variant="ghost" onClick={()=>setStep(0)}>← Voltar</Btn>
+                  <Btn onClick={doCategorize} disabled={aiLoading}>{aiLoading?'⏳ Categorizando...':'✨ Categorizar →'}</Btn>
+                </div>
+              </div>
+              <Card style={{padding:0,overflow:'auto',maxHeight:460}}>
+                <table style={{width:'100%',borderCollapse:'collapse'}}>
+                  <thead><tr style={{background:C.bg}}>
+                    {['Data','Descrição','Tipo','Valor'].map(h=>(
+                      <th key={h} style={{textAlign:'left',padding:'10px 14px',fontSize:11,fontWeight:700,color:C.sub,textTransform:'uppercase',borderBottom:`1px solid ${C.border}`}}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>{parsed.map(t=>(
+                    <tr key={t.id} style={{borderBottom:`1px solid ${C.border}`}}>
+                      <td style={{padding:'10px 14px',fontSize:12,color:C.sub,whiteSpace:'nowrap'}}>{new Date(t.date+'T12:00:00').toLocaleDateString('pt-BR')}</td>
+                      <td style={{padding:'10px 14px',fontSize:13,color:C.text,maxWidth:280,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description}</td>
+                      <td style={{padding:'10px 14px'}}><Badge color={t.type==='income'?C.green:C.red}>{t.type==='income'?'↑ Entrada':'↓ Saída'}</Badge></td>
+                      <td style={{padding:'10px 14px',fontWeight:700,color:t.type==='income'?C.green:C.red,whiteSpace:'nowrap'}}>{brl(t.amount)}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </Card>
+            </div>
+          )}
+
+          {step===2&&(
+            <div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+                <div>
+                  <p style={{margin:0,fontWeight:700,color:C.text}}>Revise as categorizações</p>
+                  <p style={{margin:'4px 0 0',fontSize:12,color:C.sub}}>✅ {reviewed.filter(t=>t.category).length} categorizadas · ❓ {reviewed.filter(t=>!t.category).length} sem categoria</p>
+                </div>
+                <div style={{display:'flex',gap:10}}>
+                  <Btn variant="ghost" onClick={()=>setStep(1)}>← Voltar</Btn>
+                  <Btn variant="accent" onClick={confirmImport} disabled={saving}>{saving?'Salvando...':'✓ Confirmar e Importar'}</Btn>
+                </div>
+              </div>
+              <Card style={{padding:0,overflow:'auto',maxHeight:500}}>
+                <table style={{width:'100%',borderCollapse:'collapse'}}>
+                  <thead><tr style={{background:C.bg}}>
+                    {['Data','Descrição','Tipo','Valor','Categoria','Origem'].map(h=>(
+                      <th key={h} style={{textAlign:'left',padding:'10px 14px',fontSize:11,fontWeight:700,color:C.sub,textTransform:'uppercase',letterSpacing:'0.04em',borderBottom:`1px solid ${C.border}`}}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>{reviewed.map((t,idx)=>(
+                    <tr key={t.id} style={{borderBottom:`1px solid ${C.border}`,background:!t.category?C.oLight:''}}>
+                      <td style={{padding:'10px 14px',fontSize:12,color:C.sub,whiteSpace:'nowrap'}}>{new Date(t.date+'T12:00:00').toLocaleDateString('pt-BR')}</td>
+                      <td style={{padding:'10px 14px',fontSize:12,color:C.text,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.description}</td>
+                      <td style={{padding:'10px 14px'}}><Badge color={t.type==='income'?C.green:C.red}>{t.type==='income'?'↑':'↓'}</Badge></td>
+                      <td style={{padding:'10px 14px',fontSize:13,fontWeight:700,color:t.type==='income'?C.green:C.red,whiteSpace:'nowrap'}}>{brl(t.amount)}</td>
+                      <td style={{padding:'6px 10px',minWidth:180}}>
+                        <select value={t.category||''} onChange={e=>{const r=[...reviewed];r[idx]={...t,category:e.target.value};setReviewed(r);}}
+                          style={{padding:'6px 10px',border:`1.5px solid ${t.category?C.border:C.orange}`,borderRadius:6,fontSize:12,fontFamily:F,outline:'none',background:'white',color:C.text,width:'100%'}}>
+                          <option value="">❓ Sem categoria</option>
+                          {categories.map(c=><option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+                        </select>
+                      </td>
+                      <td style={{padding:'10px 14px'}}>
+                        {t.src==='rule'||t.src==='kw'
+                          ? <Badge color={C.green}>Regra</Badge>
+                          : t.confidence>0
+                            ? <div style={{display:'flex',alignItems:'center',gap:5}}>
+                                <div style={{width:40,height:5,background:C.border,borderRadius:99}}>
+                                  <div style={{width:`${t.confidence*100}%`,height:'100%',background:t.confidence>0.7?C.green:C.orange,borderRadius:99}}/>
+                                </div>
+                                <span style={{fontSize:10,color:C.sub}}>{Math.round(t.confidence*100)}%</span>
+                              </div>
+                            : <span style={{color:C.sub,fontSize:11}}>—</span>
+                        }
+                      </td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </Card>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ══════════════════════════════════════════════
+    // RELATÓRIOS
+    // ══════════════════════════════════════════════
+    function ReportsPage({transactions, categories}) {
+      const now=new Date();
+      const [m,setM]=useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`);
+      const mTxs=transactions.filter(t=>t.date?.startsWith(m));
+      const totalIn =mTxs.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+      const totalOut=mTxs.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+      const catData=categories.map(cat=>{
+        const val=mTxs.filter(t=>t.category===cat.id).reduce((s,t)=>s+t.amount,0);
+        return {...cat,value:val,count:mTxs.filter(t=>t.category===cat.id).length};
+      }).filter(d=>d.value>0).sort((a,b)=>b.value-a.value);
+      const expCatData=catData.filter(c=>c.type==='expense');
+
+      function exportXlsx() {
+        const wb=XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(mTxs.map(t=>({Data:t.date,Descrição:t.description,Tipo:t.type==='income'?'Entrada':'Saída',Categoria:categories.find(c=>c.id===t.category)?.name||'',Valor:t.amount}))),'Transações');
+        const sumRows=catData.map(c=>({Categoria:c.name,Tipo:c.type==='income'?'Entrada':'Saída','Qtd.':c.count,Total:c.value}));
+        sumRows.push({},...[['TOTAL ENTRADAS',totalIn],['TOTAL SAÍDAS',totalOut],['RESULTADO',totalIn-totalOut]].map(([Categoria,Total])=>({Categoria,Total})));
+        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sumRows),'Resumo');
+        XLSX.writeFile(wb,`relatorio_${m}.xlsx`);
+      }
+
+      return (
+        <div style={{padding:28,fontFamily:F}}>
+          <PageHeader title="Relatórios" sub="Análise mensal detalhada"
+            actions={[
+              <input key="m" type="month" value={m} onChange={e=>setM(e.target.value)}
+                style={{padding:'9px 12px',border:`1.5px solid ${C.border}`,borderRadius:8,fontSize:13,fontFamily:F,outline:'none',color:C.text}}/>,
+              <Btn key="e" variant="ghost" onClick={exportXlsx}>⬇ Exportar Excel</Btn>
+            ]}/>
+
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14,marginBottom:20}}>
+            {[[`Total de Entradas`,brl(totalIn),C.green,C.gLight],[`Total de Saídas`,brl(totalOut),C.red,C.rLight],[`Resultado Líquido`,brl(totalIn-totalOut),(totalIn-totalOut)>=0?C.green:C.red,(totalIn-totalOut)>=0?C.gLight:C.rLight]].map(([l,v,c,bg],i)=>(
+              <Card key={i} style={{padding:20}}>
+                <p style={{fontSize:11,fontWeight:700,color:C.sub,textTransform:'uppercase',letterSpacing:'0.06em',margin:0}}>{l}</p>
+                <p style={{fontSize:26,fontWeight:700,color:c,margin:'8px 0 0',fontFamily:FD}}>{v}</p>
+              </Card>
+            ))}
+          </div>
+
+          <div style={{display:'grid',gridTemplateColumns:'1.3fr 1fr',gap:14,marginBottom:14}}>
+            <Card>
+              <h3 style={{margin:'0 0 16px',fontSize:13,fontWeight:700,color:C.text}}>Distribuição por Categoria</h3>
+              {catData.length>0 ? <HBarList data={catData}/> : <div style={{height:120,display:'flex',alignItems:'center',justifyContent:'center',color:C.sub,fontSize:13}}>Sem dados neste mês</div>}
+            </Card>
+            <Card>
+              <h3 style={{margin:'0 0 16px',fontSize:13,fontWeight:700,color:C.text}}>Composição das Saídas</h3>
+              <div style={{display:'flex',justifyContent:'center',marginBottom:12}}>
+                <DonutChart data={expCatData} size={150}/>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                {expCatData.slice(0,5).map(d=>(
+                  <div key={d.id} style={{display:'flex',alignItems:'center',gap:6}}>
+                    <div style={{width:8,height:8,borderRadius:99,background:d.color,flexShrink:0}}/>
+                    <span style={{fontSize:11,color:C.sub,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.icon} {d.name}</span>
+                    <span style={{fontSize:11,fontWeight:600,color:C.text}}>{((totalOut>0?d.value/totalOut:0)*100).toFixed(1)}%</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+
+          <Card style={{padding:0,overflow:'hidden'}}>
+            <div style={{padding:'14px 20px',borderBottom:`1px solid ${C.border}`}}>
+              <h3 style={{margin:0,fontSize:13,fontWeight:700,color:C.text}}>Detalhamento por Categoria</h3>
+            </div>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead><tr style={{background:C.bg}}>
+                {['Categoria','Tipo','Transações','Total','% do Grupo'].map(h=>(
+                  <th key={h} style={{textAlign:'left',padding:'10px 16px',fontSize:11,fontWeight:700,color:C.sub,textTransform:'uppercase',letterSpacing:'0.05em',borderBottom:`1px solid ${C.border}`}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {catData.length===0
+                  ? <tr><td colSpan={5} style={{padding:'32px',textAlign:'center',color:C.sub,fontSize:13}}>Sem transações neste mês</td></tr>
+                  : catData.map(c=>{
+                    const base=c.type==='income'?totalIn:totalOut;
+                    return <tr key={c.id} style={{borderBottom:`1px solid ${C.border}`}}>
+                      <td style={{padding:'12px 16px',fontSize:13,color:C.text}}>{c.icon} {c.name}</td>
+                      <td style={{padding:'12px 16px'}}><Badge color={c.type==='income'?C.green:C.red}>{c.type==='income'?'Entrada':'Saída'}</Badge></td>
+                      <td style={{padding:'12px 16px',fontSize:12,color:C.sub}}>{c.count}</td>
+                      <td style={{padding:'12px 16px',fontSize:13,fontWeight:700,color:c.type==='income'?C.green:C.red}}>{brl(c.value)}</td>
+                      <td style={{padding:'12px 16px'}}>
+                        <div style={{display:'flex',alignItems:'center',gap:8}}>
+                          <div style={{width:70,height:5,background:C.border,borderRadius:99}}>
+                            <div style={{width:`${Math.min(100,(base>0?c.value/base:0)*100)}%`,height:'100%',background:c.color,borderRadius:99}}/>
+                          </div>
+                          <span style={{fontSize:11,color:C.sub}}>{((base>0?c.value/base:0)*100).toFixed(1)}%</span>
+                        </div>
+                      </td>
+                    </tr>;
+                  })
+                }
+              </tbody>
+            </table>
+          </Card>
+        </div>
+      );
+    }
+
+    // ══════════════════════════════════════════════
+    // CONFIGURAÇÕES
+    // ══════════════════════════════════════════════
+    function SettingsPage({categories, setCategories, accounts, setAccounts, anthropicKey, setAnthropicKey}) {
+      const [tab,setTab]=useState('cats');
+      const [nCat,setNCat]=useState({name:'',type:'expense',color:'#1B7A6E',icon:'📌'});
+      const [nAcc,setNAcc]=useState({name:'',bank:'',color:'#1B7A6E'});
+      const [pw,setPw]=useState({cur:'',nxt:'',cnf:''});
+      const [pwMsg,setPwMsg]=useState('');
+      const [aiKey,setAiKey]=useState(anthropicKey||'');
+      const [aiMsg,setAiMsg]=useState('');
+
+      async function addCat() {
+        if(!nCat.name) return;
+        const cat={...nCat,id:uid(),kw:[]};
+        await DB.upsertCategory(cat);
+        setCategories([...categories,cat]);
+        setNCat({name:'',type:'expense',color:'#1B7A6E',icon:'📌'});
+      }
+      async function delCat(id) {
+        if(!confirm('Remover categoria?')) return;
+        await DB.deleteCategory(id);
+        setCategories(categories.filter(c=>c.id!==id));
+      }
+      async function addAcc() {
+        if(!nAcc.name) return;
+        const acc={...nAcc,id:uid()};
+        await DB.upsertAccount(acc);
+        setAccounts([...accounts,acc]);
+        setNAcc({name:'',bank:'',color:'#1B7A6E'});
+      }
+      async function delAcc(id) {
+        if(accounts.length<=1){alert('Mantenha ao menos uma conta.');return;}
+        if(!confirm('Remover conta?')) return;
+        await DB.deleteAccount(id);
+        setAccounts(accounts.filter(a=>a.id!==id));
+      }
+      async function savePw() {
+        const cur=await DB.getSetting('password')||'pousada123';
+        if(pw.cur!==cur){setPwMsg('❌ Senha atual incorreta.');return;}
+        if(pw.nxt!==pw.cnf){setPwMsg('❌ Confirmação não confere.');return;}
+        if(pw.nxt.length<6){setPwMsg('❌ Mínimo 6 caracteres.');return;}
+        await DB.setSetting('password',pw.nxt);
+        setPwMsg('✅ Senha alterada!'); setPw({cur:'',nxt:'',cnf:''});
+      }
+      async function saveAiKey() {
+        await DB.setSetting('anthropic_key',aiKey);
+        setAnthropicKey(aiKey);
+        setAiMsg('✅ Chave salva com sucesso!');
+        setTimeout(()=>setAiMsg(''),3000);
+      }
+
+      return (
+        <div style={{padding:28,fontFamily:F}}>
+          <PageHeader title="Configurações"/>
+          <div style={{display:'flex',gap:3,marginBottom:24,background:C.bg,padding:4,borderRadius:10,width:'fit-content',border:`1px solid ${C.border}`}}>
+            {[['cats','Categorias'],['accs','Contas'],['ai','IA'],['sec','Segurança']].map(([id,l])=>(
+              <button key={id} onClick={()=>setTab(id)}
+                style={{padding:'8px 20px',border:'none',borderRadius:7,fontSize:13,fontFamily:F,cursor:'pointer',fontWeight:tab===id?700:400,background:tab===id?C.card:C.bg,color:tab===id?C.primary:C.sub,boxShadow:tab===id?'0 1px 5px rgba(0,0,0,0.07)':'none'}}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {tab==='cats'&&(
+            <div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
+                {categories.map(c=>(
+                  <Card key={c.id} style={{padding:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:10}}>
+                      <span style={{fontSize:22}}>{c.icon}</span>
+                      <div>
+                        <p style={{margin:0,fontWeight:600,fontSize:13,color:C.text}}>{c.name}</p>
+                        <Badge color={c.type==='income'?C.green:C.red}>{c.type==='income'?'Entrada':'Saída'}</Badge>
+                      </div>
+                    </div>
+                    <div style={{display:'flex',alignItems:'center',gap:8}}>
+                      <div style={{width:10,height:10,borderRadius:99,background:c.color}}/>
+                      <span onClick={()=>delCat(c.id)} style={{cursor:'pointer',opacity:0.4}}>🗑️</span>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+              <Card style={{padding:20}}>
+                <h3 style={{margin:'0 0 14px',fontSize:13,fontWeight:700,color:C.text}}>+ Nova Categoria</h3>
+                <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 80px 60px auto',gap:10,alignItems:'end'}}>
+                  <div><label style={lbl}>Nome</label><Inp value={nCat.name} onChange={e=>setNCat(p=>({...p,name:e.target.value}))} placeholder="Ex: Passeios e Tours"/></div>
+                  <div><label style={lbl}>Tipo</label><Sel value={nCat.type} onChange={e=>setNCat(p=>({...p,type:e.target.value}))}><option value="income">Entrada</option><option value="expense">Saída</option></Sel></div>
+                  <div><label style={lbl}>Ícone</label><Inp value={nCat.icon} onChange={e=>setNCat(p=>({...p,icon:e.target.value}))} placeholder="📌"/></div>
+                  <div><label style={lbl}>Cor</label><input type="color" value={nCat.color} onChange={e=>setNCat(p=>({...p,color:e.target.value}))} style={{width:'100%',height:38,border:'none',borderRadius:6,cursor:'pointer'}}/></div>
+                  <Btn onClick={addCat} style={{alignSelf:'end'}}>Adicionar</Btn>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {tab==='accs'&&(
+            <div>
+              <div style={{display:'grid',gap:10,marginBottom:14}}>
+                {accounts.map(a=>(
+                  <Card key={a.id} style={{padding:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:12}}>
+                      <div style={{width:34,height:34,borderRadius:8,background:a.color+'22',display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}}>🏦</div>
+                      <div>
+                        <p style={{margin:0,fontWeight:600,fontSize:13,color:C.text}}>{a.name}</p>
+                        {a.bank&&<p style={{margin:'2px 0 0',fontSize:11,color:C.sub}}>{a.bank}</p>}
+                      </div>
+                    </div>
+                    <span onClick={()=>delAcc(a.id)} style={{cursor:'pointer',opacity:0.4}}>🗑️</span>
+                  </Card>
+                ))}
+              </div>
+              <Card style={{padding:20}}>
+                <h3 style={{margin:'0 0 14px',fontSize:13,fontWeight:700,color:C.text}}>+ Nova Conta</h3>
+                <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 80px auto',gap:10,alignItems:'end'}}>
+                  <div><label style={lbl}>Nome</label><Inp value={nAcc.name} onChange={e=>setNAcc(p=>({...p,name:e.target.value}))} placeholder="Ex: Nubank PJ"/></div>
+                  <div><label style={lbl}>Banco</label><Inp value={nAcc.bank} onChange={e=>setNAcc(p=>({...p,bank:e.target.value}))} placeholder="Nubank"/></div>
+                  <div><label style={lbl}>Cor</label><input type="color" value={nAcc.color} onChange={e=>setNAcc(p=>({...p,color:e.target.value}))} style={{width:'100%',height:38,border:'none',borderRadius:6,cursor:'pointer'}}/></div>
+                  <Btn onClick={addAcc} style={{alignSelf:'end'}}>Adicionar</Btn>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {tab==='ai'&&(
+            <Card style={{maxWidth:480,padding:28}}>
+              <h3 style={{margin:'0 0 8px',fontSize:15,fontWeight:700,color:C.text}}>🤖 Chave da API Anthropic</h3>
+              <p style={{color:C.sub,fontSize:13,marginBottom:20}}>Necessária para categorização automática com IA. Obtenha em <a href="https://console.anthropic.com" target="_blank" rel="noreferrer" style={{color:C.primary}}>console.anthropic.com</a></p>
+              <label style={lbl}>Chave API (começa com sk-ant-...)</label>
+              <Inp value={aiKey} onChange={e=>setAiKey(e.target.value)} placeholder="sk-ant-api03-..." style={{marginBottom:14,fontFamily:'monospace',fontSize:12}}/>
+              {aiMsg&&<p style={{color:aiMsg.startsWith('✅')?C.green:C.red,fontSize:12,marginBottom:10}}>{aiMsg}</p>}
+              <Btn onClick={saveAiKey}>Salvar Chave</Btn>
+              <p style={{color:C.sub,fontSize:11,marginTop:12}}>⚠️ Sua chave fica armazenada no Supabase e é compartilhada com todos os usuários do sistema.</p>
+            </Card>
+          )}
+
+          {tab==='sec'&&(
+            <Card style={{maxWidth:420,padding:28}}>
+              <h3 style={{margin:'0 0 20px',fontSize:15,fontWeight:700,color:C.text}}>🔒 Alterar Senha</h3>
+              <div style={{display:'grid',gap:14}}>
+                {[['Senha atual','cur','Senha atual'],['Nova senha','nxt','Mínimo 6 caracteres'],['Confirmar nova senha','cnf','Repita a nova senha']].map(([label,key,ph])=>(
+                  <div key={key}><label style={lbl}>{label}</label><Inp type="password" value={pw[key]} onChange={e=>setPw(p=>({...p,[key]:e.target.value}))} placeholder={ph}/></div>
+                ))}
+              </div>
+              {pwMsg&&<p style={{color:pwMsg.startsWith('✅')?C.green:C.red,fontSize:12,marginTop:12}}>{pwMsg}</p>}
+              <Btn onClick={savePw} style={{marginTop:16}}>Salvar Nova Senha</Btn>
+              <p style={{color:C.sub,fontSize:11,marginTop:10}}>A mesma senha funciona para todos os usuários do sistema.</p>
+            </Card>
+          )}
+        </div>
+      );
+    }
+
+    // ══════════════════════════════════════════════
+    // APP PRINCIPAL
+    // ══════════════════════════════════════════════
+    function App() {
+      const [auth,setAuth]=useState(false);
+      const [page,setPage]=useState('dashboard');
+      const [transactions,setTransactions]=useState([]);
+      const [categories,setCategories]=useState(CATS_DEFAULT);
+      const [accounts,setAccounts]=useState(ACCS_DEFAULT);
+      const [rules,setRules]=useState({});
+      const [anthropicKey,setAnthropicKey]=useState('');
+      const [loading,setLoading]=useState(true);
+      const [dbError,setDbError]=useState('');
+      const [sidebar,setSidebar]=useState(true);
+
+      useEffect(()=>{
+        if(!auth) return;
+        (async()=>{
+          try {
+            await DB.initDefaults();
+            const [txs,cats,accs,rls,aiKey]=await Promise.all([
+              DB.getTransactions(), DB.getCategories(), DB.getAccounts(), DB.getRules(),
+              DB.getSetting('anthropic_key'),
+            ]);
+            setTransactions(txs);
+            if(cats.length) setCategories(cats);
+            if(accs.length) setAccounts(accs);
+            setRules(rls);
+            if(aiKey) setAnthropicKey(aiKey);
+            setLoading(false);
+          }catch(e){setDbError(e.message); setLoading(false);}
+        })();
+      },[auth]);
+
+      if(!auth) return <LoginPage onLogin={()=>setAuth(true)}/>;
+
+      if(loading) return (
+        <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:C.bg,flexDirection:'column',gap:12,fontFamily:F}}>
+          <div style={{fontSize:52}}>🏨</div>
+          <p style={{fontFamily:FD,fontSize:20,color:C.text}}>Carregando Pousada Finance...</p>
+          <p style={{color:C.sub,fontSize:13}}>Conectando ao banco de dados</p>
+        </div>
+      );
+
+      if(dbError) return (
+        <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:C.bg,flexDirection:'column',gap:12,fontFamily:F}}>
+          <div style={{fontSize:52}}>⚠️</div>
+          <p style={{fontFamily:FD,fontSize:20,color:C.red}}>Erro ao conectar</p>
+          <p style={{color:C.sub,fontSize:13,maxWidth:400,textAlign:'center'}}>{dbError}</p>
+          <Btn onClick={()=>window.location.reload()}>Tentar Novamente</Btn>
+        </div>
+      );
+
+      const nav=[
+        {id:'dashboard',icon:'📊',l:'Dashboard'},
+        {id:'transactions',icon:'💳',l:'Transações'},
+        {id:'import',icon:'📥',l:'Importar Extrato'},
+        {id:'reports',icon:'📈',l:'Relatórios'},
+        {id:'settings',icon:'⚙️',l:'Configurações'},
+      ];
+
+      return (
+        <div style={{display:'flex',minHeight:'100vh',background:C.bg,fontFamily:F}}>
+          {/* Sidebar */}
+          <div style={{width:sidebar?216:54,background:C.card,borderRight:`1px solid ${C.border}`,display:'flex',flexDirection:'column',flexShrink:0,transition:'width 0.2s',overflow:'hidden'}}>
+            <div style={{padding:sidebar?'18px 16px':'18px 10px',borderBottom:`1px solid ${C.border}`,display:'flex',alignItems:'center',gap:10}}>
+              <span style={{fontSize:22,flexShrink:0}}>🏨</span>
+              {sidebar&&<span style={{fontFamily:FD,fontWeight:600,fontSize:14,color:C.text,whiteSpace:'nowrap'}}>Pousada Finance</span>}
+            </div>
+            <nav style={{flex:1,padding:'10px 6px'}}>
+              {nav.map(item=>(
+                <button key={item.id} onClick={()=>setPage(item.id)}
+                  style={{display:'flex',alignItems:'center',gap:10,width:'100%',padding:sidebar?'10px 12px':'10px',background:page===item.id?C.pLight:'transparent',color:page===item.id?C.primary:C.sub,border:'none',borderRadius:8,cursor:'pointer',marginBottom:2,fontWeight:page===item.id?700:400,fontSize:13,fontFamily:F,textAlign:'left',overflow:'hidden',whiteSpace:'nowrap'}}>
+                  <span style={{fontSize:16,flexShrink:0}}>{item.icon}</span>
+                  {sidebar&&<span>{item.l}</span>}
+                </button>
+              ))}
+            </nav>
+            <div style={{padding:'8px 6px',borderTop:`1px solid ${C.border}`,display:'flex',flexDirection:'column',gap:4}}>
+              <button onClick={()=>setSidebar(!sidebar)} style={{padding:'8px',background:C.bg,border:`1px solid ${C.border}`,cursor:'pointer',borderRadius:8,color:C.sub,fontSize:12,fontFamily:F,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                {sidebar?'◀':'▶'}
+              </button>
+              <button onClick={()=>setAuth(false)} style={{padding:'8px',background:'transparent',border:`1px solid ${C.border}`,cursor:'pointer',borderRadius:8,color:C.sub,fontSize:12,fontFamily:F,display:'flex',alignItems:'center',justifyContent:sidebar?'flex-start':'center',gap:6}}>
+                <span>🚪</span>{sidebar&&<span>Sair</span>}
+              </button>
+            </div>
+          </div>
+
+          {/* Conteúdo */}
+          <div style={{flex:1,overflow:'auto'}}>
+            {page==='dashboard'    && <DashboardPage transactions={transactions} categories={categories} accounts={accounts}/>}
+            {page==='transactions' && <TransactionsPage transactions={transactions} setTransactions={setTransactions} categories={categories} accounts={accounts}/>}
+            {page==='import'       && <ImportPage transactions={transactions} setTransactions={setTransactions} categories={categories} accounts={accounts} rules={rules} setRules={setRules} anthropicKey={anthropicKey}/>}
+            {page==='reports'      && <ReportsPage transactions={transactions} categories={categories}/>}
+            {page==='settings'     && <SettingsPage categories={categories} setCategories={setCategories} accounts={accounts} setAccounts={setAccounts} anthropicKey={anthropicKey} setAnthropicKey={setAnthropicKey}/>}
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>
