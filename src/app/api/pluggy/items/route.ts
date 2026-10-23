@@ -1,22 +1,39 @@
 import { NextResponse } from "next/server";
 import { requireAuthorizedUser } from "@/lib/auth";
+import { garantirWebhookGeral, PADRAO_ITEM_ID } from "@/lib/pluggy";
 import { removerConexao, sincronizarItem } from "@/lib/sync";
 
 export const maxDuration = 60;
 
-/** Chamado pelo navegador quando o widget conclui uma conexão: grava o item e importa os dados. */
+/**
+ * Grava uma conexão e importa os dados. Chamado quando o widget conclui uma
+ * conexão, ou quando o Item ID é colado à mão (conexões criadas no painel do
+ * Pluggy, por exemplo via Meu Pluggy).
+ */
 export async function POST(request: Request) {
   const auth = await requireAuthorizedUser();
   if (!auth.ok) return auth.response;
 
   try {
     const corpo = await request.json().catch(() => null);
-    const itemId = corpo?.itemId;
-    if (typeof itemId !== "string" || itemId.length < 10) {
-      return NextResponse.json({ error: "itemId inválido." }, { status: 400 });
+    const itemId = typeof corpo?.itemId === "string" ? corpo.itemId.trim() : "";
+    if (!PADRAO_ITEM_ID.test(itemId)) {
+      return NextResponse.json(
+        { error: "Item ID inválido. Ele tem o formato 1a2b3c4d-1234-5678-9abc-1234567890ab." },
+        { status: 400 },
+      );
     }
     const resultado = await sincronizarItem(itemId);
-    return NextResponse.json(resultado);
+
+    // Conexões feitas fora do sistema não trazem o nosso webhook; cadastra o geral.
+    let webhookAtivo = false;
+    try {
+      webhookAtivo = await garantirWebhookGeral();
+    } catch (erro) {
+      console.error("[pluggy] não foi possível cadastrar o webhook geral:", erro);
+    }
+
+    return NextResponse.json({ ...resultado, webhookAtivo });
   } catch (erro) {
     return NextResponse.json({ error: mensagemDeErro(erro) }, { status: 500 });
   }

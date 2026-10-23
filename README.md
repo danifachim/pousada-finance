@@ -102,6 +102,20 @@ Pluggy ──(3) webhook──▶ /api/pluggy/webhook ──▶ atualiza contas 
 
 ---
 
+### Conta de teste (trial) do Pluggy e Meu Pluggy
+
+Se o “Conectar banco” mostrar `TRIAL_CLIENT_ITEM_CREATE_NOT_ALLOWED`, a conta do Pluggy não
+permite criar conexões pelo sistema. Nesse caso:
+
+1. Ligue os bancos em <https://meu.pluggy.ai>.
+2. No painel do Pluggy (<https://dashboard.pluggy.ai>), abra a aplicação, use o app de
+   demonstração para conectar o conector **MeuPluggy** e copie o **Item ID** da conexão.
+3. No sistema, em **Conexões → Importar conexão pelo Item ID**, cole o código e clique em
+   **Importar**.
+
+Na primeira importação o sistema cadastra sozinho um webhook geral na aplicação do Pluggy,
+para que as atualizações diárias do Meu Pluggy cheguem automaticamente.
+
 ## Pontos de atenção (leia antes de confiar nos números)
 
 - **Pagamento de fatura de cartão aparece duas vezes** (saída na conta e crédito no cartão).

@@ -1,5 +1,6 @@
 import { AcoesConexao } from "@/components/acoes-conexao";
 import { ConectarBanco } from "@/components/conectar-banco";
+import { ImportarItem } from "@/components/importar-item";
 import { Aviso, Cabecalho, Cartao, EstadoVazio } from "@/components/ui";
 import { diasAte, formatarDataHora } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
@@ -51,6 +52,10 @@ export default async function PaginaConexoes() {
           </Aviso>
         </div>
       )}
+
+      <Cartao className="mb-4">
+        <ImportarItem />
+      </Cartao>
 
       {conexoes.length === 0 ? (
         <EstadoVazio>

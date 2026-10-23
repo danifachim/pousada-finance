@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuthorizedUser } from "@/lib/auth";
-import { getPluggy } from "@/lib/pluggy";
+import { getPluggy, urlDoWebhook } from "@/lib/pluggy";
 
 /**
  * Gera o "connect token" (vale 30 min) que abre o widget do Pluggy no navegador.
@@ -17,12 +17,7 @@ export async function POST(request: Request) {
     const itemId = typeof corpo?.itemId === "string" ? corpo.itemId : undefined;
 
     // O webhook só funciona com URL pública em HTTPS (ex.: o endereço na Vercel).
-    const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "");
-    const segredo = process.env.PLUGGY_WEBHOOK_SECRET;
-    const webhookUrl =
-      appUrl.startsWith("https://") && segredo
-        ? `${appUrl}/api/pluggy/webhook?token=${encodeURIComponent(segredo)}`
-        : undefined;
+    const webhookUrl = urlDoWebhook();
 
     const { accessToken } = await getPluggy().createConnectToken(itemId, {
       webhookUrl,
